@@ -1,0 +1,33 @@
+# Reusable production deploy for rp-site-* tenant repos (site engine v3, plan §3).
+# Called by the tenant repo's tag-triggered workflow: rpdms creates deploy-v<N>
+# on the merged commit when a manager clicks Publish; nothing else may create
+# tags (ruleset). Deploys the freshly built dist/ to the tenant's Azure Static
+# Web App production environment.
+name: Site deploy
+
+on:
+  workflow_call:
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci
+      - name: Astro build
+        run: npx astro build
+      - name: Deploy to SWA production
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_SWA_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$SWA_TOKEN" ]; then
+            echo "::error::AZURE_SWA_DEPLOY_TOKEN is not set — production deploy cannot proceed."
+            exit 1
+          fi
+          npx @azure/static-web-apps-cli deploy ./dist --deployment-token "$SWA_TOKEN" --env production

@@ -1,0 +1,100 @@
+# Reusable PR checks for rp-site-* tenant repos (site engine v3, plan §6).
+# Tenant repos call this via a thin caller workflow; the branch ruleset requires
+# these named jobs, so a tenant repo cannot weaken the gate without visibly
+# failing required checks. Checks run on the BUILT dist/ — the truth users see.
+name: Site PR checks
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout site
+        uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci
+      - name: Astro build
+        run: npx astro build
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  impeccable:
+    name: Impeccable design review
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout checks
+        uses: actions/checkout@v4
+        with:
+          repository: Clickharder-Consulting-Inc/rp-site-checks
+          path: .checks
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install detector deps
+        working-directory: .checks/vendor/impeccable
+        run: npm ci --omit=dev || npm install --omit=dev
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Detect
+        run: node .checks/scripts/impeccable-gate.mjs dist
+
+  compliance:
+    name: Compliance review
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout site (FACTS.json)
+        uses: actions/checkout@v4
+      - name: Checkout checks
+        uses: actions/checkout@v4
+        with:
+          repository: Clickharder-Consulting-Inc/rp-site-checks
+          path: .checks
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Check compliance anchors + grounding
+        run: node .checks/scripts/compliance-check.mjs dist FACTS.json
+
+  preview:
+    name: Preview deploy
+    needs: [impeccable, compliance]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      # Skips visibly (not silently) when the SWA token secret is not yet
+      # provisioned — the gate jobs above still protect the merge.
+      - name: Deploy to SWA preview environment
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_SWA_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$SWA_TOKEN" ]; then
+            echo "::warning::AZURE_SWA_DEPLOY_TOKEN not set — preview deploy skipped."
+            echo "### Preview deploy skipped (no AZURE_SWA_DEPLOY_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          npx @azure/static-web-apps-cli deploy ./dist --deployment-token "$SWA_TOKEN" --env preview
