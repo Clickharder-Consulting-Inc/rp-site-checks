@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout site
-        uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install
@@ -22,7 +22,7 @@ jobs:
       - name: Astro build
         run: npx astro build
       - name: Upload dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -34,19 +34,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout checks
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Clickharder-Consulting-Inc/rp-site-checks
           path: .checks
           submodules: recursive
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install detector deps
         working-directory: .checks/vendor/impeccable
         run: npm ci --omit=dev || npm install --omit=dev
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
@@ -59,17 +59,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout site (FACTS.json)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Checkout checks
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Clickharder-Consulting-Inc/rp-site-checks
           path: .checks
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
