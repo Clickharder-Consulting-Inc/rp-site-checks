@@ -80,6 +80,12 @@ jobs:
     name: Preview deploy
     needs: [impeccable, compliance]
     runs-on: ubuntu-latest
+    # The URL is recorded as a deployment status so rpdms can show the operator
+    # a reviewable link (it reads the commit's deployments when this check
+    # completes). Without this the preview exists but nobody can find it.
+    permissions:
+      contents: read
+      deployments: write
     steps:
       - name: Download dist
         uses: actions/download-artifact@v8
@@ -89,6 +95,7 @@ jobs:
       # Skips visibly (not silently) when the SWA token secret is not yet
       # provisioned — the gate jobs above still protect the merge.
       - name: Deploy to SWA preview environment
+        id: deploy
         env:
           SWA_TOKEN: ${{ secrets.AZURE_SWA_DEPLOY_TOKEN }}
         run: |
@@ -97,4 +104,39 @@ jobs:
             echo "### Preview deploy skipped (no AZURE_SWA_DEPLOY_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          npx @azure/static-web-apps-cli deploy ./dist --deployment-token "$SWA_TOKEN" --env preview
+          set -o pipefail
+          npx @azure/static-web-apps-cli deploy ./dist             --deployment-token "$SWA_TOKEN" --env preview 2>&1 | tee deploy.log
+          url=$(grep -oE 'https://[a-z0-9.-]+\.azurestaticapps\.net' deploy.log | head -1)
+          if [ -z "$url" ]; then
+            echo "::warning::preview deployed but no URL could be read from the output."
+            exit 0
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### Preview: $url" >> "$GITHUB_STEP_SUMMARY"
+      # Recorded for rpdms: it reads the commit's deployment statuses when this
+      # check completes, so the operator gets the link in the app.
+      - name: Record the preview URL as a deployment status
+        if: steps.deploy.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          dep=$(gh api "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id <<JSON
+          {
+            "ref": "$GITHUB_SHA",
+            "environment": "preview",
+            "auto_merge": false,
+            "required_contexts": [],
+            "transient_environment": true,
+            "description": "rpdms PR preview"
+          }
+          JSON
+          )
+          gh api "repos/$GITHUB_REPOSITORY/deployments/$dep/statuses" --input - >/dev/null <<JSON
+          {
+            "state": "success",
+            "environment_url": "$URL",
+            "description": "Preview of this revision"
+          }
+          JSON
+          echo "Recorded deployment $dep -> $URL"
