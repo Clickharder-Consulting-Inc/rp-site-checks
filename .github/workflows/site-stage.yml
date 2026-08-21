@@ -1,0 +1,89 @@
+# Reusable STAGING deploy for rp-site-* tenant repos (site engine v3).
+#
+# Production deploys only on a deploy-v* tag (site-deploy.yml) when a manager
+# clicks Publish in rpdms. This one runs on every merge to main so the operator
+# can SEE the merged-but-unpublished site before publishing it — the review
+# moment, now that revisions auto-merge on green checks.
+#
+# It deploys to ONE named SWA environment ("staging"), reusing the tenant's
+# existing AZURE_SWA_DEPLOY_TOKEN, so there is no environment sprawl and no new
+# secret. The deployed URL is recorded as a GitHub deployment status, which is
+# how rpdms learns it (it reads deployments for the commit after the run).
+name: Site staging
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'SWA environment name to deploy to'
+        required: false
+        type: string
+        default: staging
+
+jobs:
+  stage:
+    name: Deploy to staging
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci
+      - name: Astro build
+        run: npx astro build
+      - name: Deploy to SWA staging
+        id: deploy
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_SWA_DEPLOY_TOKEN }}
+          SWA_ENV: ${{ inputs.environment }}
+        run: |
+          if [ -z "$SWA_TOKEN" ]; then
+            echo "::error::AZURE_SWA_DEPLOY_TOKEN is not set — staging deploy cannot proceed."
+            exit 1
+          fi
+          set -o pipefail
+          npx @azure/static-web-apps-cli deploy ./dist \
+            --deployment-token "$SWA_TOKEN" --env "$SWA_ENV" 2>&1 | tee deploy.log
+          # The URL is the whole point of a staging deploy — a run that cannot
+          # report one is a failure, not a silent success.
+          url=$(grep -oE 'https://[a-z0-9.-]+\.azurestaticapps\.net' deploy.log | head -1)
+          if [ -z "$url" ]; then
+            echo "::error::staging deploy produced no URL — see the log above."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Staged at $url"
+      # Recorded as a deployment status so rpdms can read the URL back for this
+      # commit (it polls deployments on workflow_run success — no extra webhook
+      # subscription needed).
+      - name: Record the staging URL as a deployment status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.deploy.outputs.url }}
+          SWA_ENV: ${{ inputs.environment }}
+        run: |
+          dep=$(gh api "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id <<JSON
+          {
+            "ref": "$GITHUB_SHA",
+            "environment": "$SWA_ENV",
+            "auto_merge": false,
+            "required_contexts": [],
+            "transient_environment": true,
+            "description": "rpdms staging deploy"
+          }
+          JSON
+          )
+          gh api "repos/$GITHUB_REPOSITORY/deployments/$dep/statuses" --input - >/dev/null <<JSON
+          {
+            "state": "success",
+            "environment_url": "$URL",
+            "description": "Staged from main — awaiting Publish in rpdms"
+          }
+          JSON
+          echo "Recorded deployment $dep -> $URL"
