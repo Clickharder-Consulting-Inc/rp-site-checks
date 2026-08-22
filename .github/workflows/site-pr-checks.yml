@@ -78,7 +78,12 @@ jobs:
 
   preview:
     name: Preview deploy
-    needs: [impeccable, compliance]
+    # Runs as soon as the build artifact exists, in PARALLEL with the gate jobs
+    # (it deploys to a preview environment, not production, and the gates are
+    # what block the merge). Skipped for agent/* branches: the agent job already
+    # deployed its own build, so repeating it wastes a minute and races.
+    if: ${{ !startsWith(github.head_ref, 'agent/') }}
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - name: Download dist
