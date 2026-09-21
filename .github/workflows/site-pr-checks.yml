@@ -26,7 +26,13 @@ jobs:
         with:
           name: dist
           path: dist/
-          retention-days: 7
+          # A job-to-job hand-off, not an archive: impeccable, compliance and
+          # preview all download it inside this same run, which takes minutes.
+          # Retention past that only buys post-hoc debugging, and the build
+          # reproduces locally with `npx astro build` or by re-running the job.
+          # At 7 days one tenant site held 587 MB of live artifacts; 2 keeps a
+          # failed run inspectable overnight without paying for a week of them.
+          retention-days: 2
 
   impeccable:
     name: Impeccable design review
