@@ -8,6 +8,14 @@
 //     - every page carries the licence ref, an 18+ marker, the mailing
 //       address, the sender identity, and a link to the privacy policy
 //     - no external <script src> (only same-origin bundles)
+//     - Google Analytics is platform-owned (FACTS analytics.ga4MeasurementId,
+//       set from RPL's Lottery site screen):
+//         * an ID in FACTS → every page carries /js/rp-ga4.js with THAT ID,
+//           the script ships in dist, and the CSP admits Google's hosts
+//           (a revision that drops the tag fails — the tag is protected)
+//         * no ID in FACTS → no page carries the tag (no stale tracking)
+//         * never a hand-pasted gtag/googletagmanager snippet or stray
+//           measurement ID (prevents double tags and IDs RPL doesn't know)
 //   warnings (reported, non-blocking — parity with the rpdms grounding gate):
 //     - money/percent claims in visible text that don't trace to FACTS
 //       (claims.allowedNumbers + ticket prices + prize values)
@@ -60,6 +68,26 @@ if (!pages.length) {
   process.exit(2);
 }
 
+// --- Google Analytics (platform-owned) — site-wide preconditions ---
+const GA_ID_FORMAT = /^G-[A-Z0-9]{4,20}$/;
+const gaId = facts.analytics?.ga4MeasurementId ?? null;
+if (gaId !== null && !GA_ID_FORMAT.test(String(gaId))) {
+  errors.push(`FACTS.json analytics.ga4MeasurementId "${gaId}" is not a GA4 measurement ID (G-XXXXXXXX) — fix it on RPL's Lottery site screen`);
+}
+const gaOn = gaId !== null && GA_ID_FORMAT.test(String(gaId));
+if (gaOn) {
+  if (!existsSync(path.join(distDir, 'js', 'rp-ga4.js'))) {
+    errors.push('analytics is configured but dist/js/rp-ga4.js is missing — the consent script must ship with the site');
+  }
+  // Without these hosts in the CSP the browser blocks GA silently — fail visibly.
+  const swa = path.join(distDir, 'staticwebapp.config.json');
+  const csp = existsSync(swa) ? String(JSON.parse(readFileSync(swa, 'utf8')).globalHeaders?.['Content-Security-Policy'] ?? '') : '';
+  const directive = (name) => (csp.split(';').map((d) => d.trim()).find((d) => d.startsWith(name + ' ')) ?? '');
+  if (!/googletagmanager\.com/.test(directive('script-src'))) errors.push('analytics is configured but the CSP script-src does not admit https://*.googletagmanager.com — GA would be blocked');
+  if (!/google-analytics\.com/.test(directive('connect-src'))) errors.push('analytics is configured but the CSP connect-src does not admit https://*.google-analytics.com — GA hits would be blocked');
+}
+const GA_TAG = /<script[^>]*\ssrc=["']\/js\/rp-ga4\.js["'][^>]*>/i;
+
 for (const page of pages) {
   const relPage = path.relative(distDir, page).replaceAll('\\', '/');
   const html = readFileSync(page, 'utf8');
@@ -84,6 +112,24 @@ for (const page of pages) {
   for (const m of html.matchAll(/<script[^>]*\ssrc=["']([^"']+)["']/gi)) {
     const src = m[1];
     if (!(src.startsWith('/') || src.startsWith('./'))) errors.push(`${relPage}: external script "${src}"`);
+  }
+
+  // Google Analytics: exactly the platform tag, with FACTS' ID — nothing else.
+  const gaTags = [...html.matchAll(new RegExp(GA_TAG.source, 'gi'))].map((m) => m[0]);
+  const tagId = gaTags[0]?.match(/\sdata-ga-id=["']([^"']*)["']/i)?.[1] ?? null;
+  if (gaOn) {
+    if (!gaTags.length) errors.push(`${relPage}: Google Analytics is configured but the page is missing the /js/rp-ga4.js tag`);
+    else if (tagId !== gaId) errors.push(`${relPage}: GA tag carries "${tagId ?? '(no id)'}" but FACTS sets "${gaId}"`);
+  } else if (gaTags.length) {
+    errors.push(`${relPage}: GA tag present but FACTS.json sets no analytics.ga4MeasurementId — remove it, or configure GA on RPL's Lottery site screen`);
+  }
+  if (gaTags.length > 1) errors.push(`${relPage}: more than one GA tag on the page`);
+  const scriptBodies = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]).join('\n');
+  if (/gtag\s*\(|googletagmanager\.com|google-analytics\.com/i.test(scriptBodies) || /googletagmanager\.com|google-analytics\.com/i.test(html)) {
+    errors.push(`${relPage}: hand-added Google tag — GA4 is configured from RPL's Lottery site screen, not pasted into pages`);
+  }
+  for (const s of new Set([...scriptBodies.matchAll(/\bG-[A-Z0-9]{6,20}\b/g)].map((m) => m[0]))) {
+    errors.push(`${relPage}: stray GA measurement ID "${s}" in a script — only the platform tag may carry one`);
   }
 
   const tokens = [
