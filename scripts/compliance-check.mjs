@@ -133,7 +133,9 @@ for (const page of pages) {
   }
 
   const tokens = [
-    ...text.matchAll(/\$\s?[\d][\d,]*(?:\.\d+)?(?:\s?(?:million|M|k))?/g),
+    // The magnitude suffix needs a word boundary: without it "$17,000 MRI"
+    // read as "$17,000M" and "$1,000 Milk River" hid the real "$1,000".
+    ...text.matchAll(/\$\s?[\d][\d,]*(?:\.\d+)?(?:\s?(?:million|M|k)\b)?/g),
     ...text.matchAll(/\b\d+(?:\.\d+)?\s?%/g),
   ].map((m) => m[0].replace(/\s+/g, ''));
   for (const t of new Set(tokens)) {
