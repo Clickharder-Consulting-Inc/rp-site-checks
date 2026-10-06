@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout site
         uses: actions/checkout@v7
@@ -37,7 +37,7 @@ jobs:
   impeccable:
     name: Impeccable design review
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout checks
         uses: actions/checkout@v7
@@ -62,7 +62,7 @@ jobs:
   compliance:
     name: Compliance review
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout site (FACTS.json)
         uses: actions/checkout@v7
@@ -90,7 +90,7 @@ jobs:
     # deployed its own build, so repeating it wastes a minute and races.
     if: ${{ !startsWith(github.head_ref, 'agent/') }}
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Download dist
         uses: actions/download-artifact@v8
