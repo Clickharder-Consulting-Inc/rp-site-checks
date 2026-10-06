@@ -51,12 +51,22 @@ const visibleText = (html) =>
     .replace(/\s+/g, ' ');
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
 
-// Grounded numbers: explicit allow-list + every price/value stated in FACTS.
+// Money / percent tokens as they appear in page text. The magnitude suffix
+// needs a word boundary: without it "$17,000 MRI" read as "$17,000M".
+const MONEY_RE = /\$\s?[\d][\d,]*(?:\.\d+)?(?:\s?(?:million|M|k)\b)?/g;
+const PERCENT_RE = /\b\d+(?:\.\d+)?\s?%/g;
+const claimTokens = (text) => [...text.matchAll(MONEY_RE), ...text.matchAll(PERCENT_RE)].map((m) => m[0].replace(/\s+/g, ''));
+
+// Grounded numbers: explicit allow-list + every price/value stated in FACTS +
+// every amount inside an extraFacts value. extraFacts is the projection of the
+// operator's Tenant data facts — an attested amount ("Splash park donation":
+// "$17,000") arrives there, and this is what makes it count as grounded.
 const allowed = new Set(
   [
     ...(facts.claims?.allowedNumbers ?? []),
     ...(facts.raffle?.ticketPricing ?? []).map((t) => t.price),
     ...(facts.raffle?.prizes ?? []).map((p) => p.value).filter(Boolean),
+    ...Object.values(facts.extraFacts ?? {}).flatMap((v) => (typeof v === 'string' ? claimTokens(v) : [])),
   ].map((s) => String(s).replace(/\s+/g, '')),
 );
 
@@ -132,12 +142,7 @@ for (const page of pages) {
     errors.push(`${relPage}: stray GA measurement ID "${s}" in a script — only the platform tag may carry one`);
   }
 
-  const tokens = [
-    // The magnitude suffix needs a word boundary: without it "$17,000 MRI"
-    // read as "$17,000M" and "$1,000 Milk River" hid the real "$1,000".
-    ...text.matchAll(/\$\s?[\d][\d,]*(?:\.\d+)?(?:\s?(?:million|M|k)\b)?/g),
-    ...text.matchAll(/\b\d+(?:\.\d+)?\s?%/g),
-  ].map((m) => m[0].replace(/\s+/g, ''));
+  const tokens = claimTokens(text);
   for (const t of new Set(tokens)) {
     if (!allowed.has(t)) warnings.push(`${relPage}: ungrounded claim "${t}" — not in FACTS.json`);
   }
