@@ -1,6 +1,6 @@
 # rp-site-checks
 
-Central, reusable PR checks + deploy workflow for Raffles Plus DMS tenant lottery
+Central, reusable PR checks + deploy workflow for Rafflesplus RPL tenant lottery
 sites (site engine v3 — `raffles-plus-dms/docs/raffles-plus-site-github-flow-plan.md` §6).
 
 Tenant repos (`rp-site-*`) carry only thin caller workflows; the real gates live
