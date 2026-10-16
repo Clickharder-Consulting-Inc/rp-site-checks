@@ -24,6 +24,13 @@ jobs:
   stage:
     name: Deploy to staging
     runs-on: ubuntu-24.04
+    # Two merges seconds apart (a revision and a workflow sync, 2026-10-16) both
+    # deployed to the ONE staging environment, and Azure cancelled the second.
+    # Queue them instead, and never cancel an upload in flight. GitHub keeps only
+    # the newest waiting run; main is linear, so that run includes every merge.
+    concurrency:
+      group: site-stage-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
     permissions:
       contents: read
       deployments: write
@@ -49,8 +56,15 @@ jobs:
             exit 1
           fi
           set -o pipefail
-          npx @azure/static-web-apps-cli deploy ./dist \
-            --deployment-token "$SWA_TOKEN" --env "$SWA_ENV" 2>&1 | tee deploy.log
+          if ! npx @azure/static-web-apps-cli deploy ./dist \
+            --deployment-token "$SWA_TOKEN" --env "$SWA_ENV" 2>&1 | tee deploy.log; then
+            # Say WHY as an ::error:: line: rpdms shows it on the version, and
+            # "exit code 1" alone tells the operator nothing. The CLI colours
+            # the reason (raw ESC, or ^[ once GitHub stores the log).
+            reason=$(sed -E 's/(\x1b|\^\[)\[[0-9;]*m//g' deploy.log | grep -oE 'Deployment Failure Reason: .*' | head -1 | sed 's/^Deployment Failure Reason: //')
+            echo "::error::Azure Static Web Apps did not complete the staging deploy: ${reason:-see the log above}"
+            exit 1
+          fi
           # The URL is the whole point of a staging deploy — a run that cannot
           # report one is a failure, not a silent success.
           url=$(grep -oE 'https://[a-z0-9.-]+\.azurestaticapps\.net' deploy.log | head -1)
